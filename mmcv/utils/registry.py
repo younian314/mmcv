@@ -54,6 +54,14 @@ def build_from_cfg(cfg: Dict,
         for name, value in default_args.items():
             args.setdefault(name, value)
 
+    if 'from_torchscript' in args:
+        torchscript_path = args.pop('from_torchscript')
+        try:
+            import torch
+            return torch.jit.load(torchscript_path)
+        except Exception as e:
+            raise type(e)(f'load model {args["type"]} from torchscript failed: {e}')
+
     obj_type = args.pop('type')
     if isinstance(obj_type, str):
         obj_cls = registry.get(obj_type)

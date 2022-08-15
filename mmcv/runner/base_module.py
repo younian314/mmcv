@@ -7,6 +7,8 @@ from logging import FileHandler
 from typing import Iterable, Optional
 
 import torch.nn as nn
+import torch
+import os
 
 from mmcv.runner.dist_utils import master_only
 from mmcv.utils.logging import get_logger, logger_initialized, print_log
@@ -42,6 +44,9 @@ class BaseModule(nn.Module, metaclass=ABCMeta):
         self._is_init = False
 
         self.init_cfg = copy.deepcopy(init_cfg)
+        
+        self.save_torchscript = None
+        self.infer_torchscript = False
 
         # Backward compatibility in derived classes
         # if pretrained is not None:
@@ -168,6 +173,42 @@ class BaseModule(nn.Module, metaclass=ABCMeta):
         if self.init_cfg:
             s += f'\ninit_cfg={self.init_cfg}'
         return s
+    
+    def do_infer(self, model, model_name=None, *inputs):
+        """do_infer combines model inference and torchscript conversion. 
+
+        Args:
+            model (torch.nn.Module): Model to do inference, and to be converted to torchScript optionally. 
+                
+            inputs (tuple, list or torch.Tensor): Input data for model forward method.
+            
+        Keyword arguments:
+            model_name (``string``, optional): Converted torchScript filename
+
+        Returns:
+            return outputs of model inference.
+        """
+        
+        if self.save_torchscript and model_name and model_name != '':
+            save_path = os.path.join(self.save_torchscript, model_name) 
+            jit_model = self.to_torchscript(model, inputs, save_path)
+            
+            if self.infer_torchscript:
+                return jit_model(*inputs)
+            
+        if not self.save_torchscript or not self.infer_torchscript:
+            return model(*inputs)
+    
+    def to_torchscript(self, model, inputs, save_path, overwrite=False):
+        if isinstance(model, torch.jit.ScriptModule):
+            return model
+        if not overwrite and os.path.exists(save_path):
+            jit_model = torch.jit.load(save_path) 
+            return jit_model
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        jit_model = torch.jit.trace(model, inputs) 
+        jit_model.save(save_path)
+        return jit_model
 
 
 class Sequential(BaseModule, nn.Sequential):
